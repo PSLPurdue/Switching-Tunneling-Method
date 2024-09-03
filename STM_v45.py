@@ -1,5 +1,15 @@
 """
+Updated September 2024
+
 ===============
+Riley, K.S., Jhon, M.H., Le Ferrand, H., Wang, D., and Arrieta, A.F. Inverse 
+design of bistable composite laminates with switching tunneling method for 
+global optimization. 
+Commun Eng 3, 115 (2024). 
+https://doi.org/10.1038/s44172-024-00260-x
+
+===============
+
 Originally based on:
     Adaptive Memory Programming for Global Optimization (AMPGO).
     
@@ -13,10 +23,10 @@ Originally based on:
 ===============
 
 Significantly modified using techniques from:
-    S. Gomez and C. Barron, “The exponential tunneling method,” Ser. Reportes Investig. IIMAS, vol. 1, no. 3, 1991.
-    A. V. Levy and Susana, “The Tunneling Method Applied to Global Optimization,” in Numerical Optimization, P. T. Boggs, R. H. Byrd, and R. B. Schnabel, Eds. New York: Society for Industrial & Applied Mathematics, 1985, pp. 213–244.
-    L. Castellanos and S. Gómez, “A new implementation of the tunneling methods for bound constrained global optimization,” Rep. Investig. IIMAS, vol. 10, no. 59, pp. 1–18, 2000.
-    J. Nocedal and S. J. Wright, Numerical Optimization, 2nd ed. 2006.
+    [1] S. Gomez and C. Barron, “The exponential tunneling method,” Ser. Reportes Investig. IIMAS, vol. 1, no. 3, 1991.
+    [2] A. V. Levy and Susana, “The Tunneling Method Applied to Global Optimization,” in Numerical Optimization, P. T. Boggs, R. H. Byrd, and R. B. Schnabel, Eds. New York: Society for Industrial & Applied Mathematics, 1985, pp. 213–244.
+    [3] L. Castellanos and S. Gómez, “A new implementation of the tunneling methods for bound constrained global optimization,” Rep. Investig. IIMAS, vol. 10, no. 59, pp. 1–18, 2000.
+    [4] J. Nocedal and S. J. Wright, Numerical Optimization, 2nd ed. 2006.
 ==============
     
 Modifications include:
@@ -33,9 +43,10 @@ Many of the parameters (minimum step sizes, tolerances, slack, etc) are problem
 dependent and must be tested/adjusted accordingly.
     
 See paper:
-Inverse Design of Bistable Composite Laminates with Switching
-Tunneling Method for Global Optimization
-Katherine S. Riley, Mark H. Jhon, Hortense Le Ferrand, Dan Wang, Andres F. Arrieta
+Riley, K.S., Jhon, M.H., Le Ferrand, H., Wang, D., and Arrieta, A.F. 
+Inverse design of bistable composite laminates with switching tunneling method 
+for global optimization. Commun Eng 3, 115 (2024). 
+https://doi.org/10.1038/s44172-024-00260-x
 
 ==============
 This source code is licensed under the BSD-style license found in the
@@ -53,40 +64,55 @@ import time
 import switchcount2
 from numba import jit
 
-SCIPY_LOCAL_SOLVERS = ['Nelder-Mead', 'Powell', 'L-BFGS-B', 'TNC', 'SLSQP','Newton-CG'] #added newton-cg nye 2019
+SCIPY_LOCAL_SOLVERS = ['Nelder-Mead', 'Powell', 'L-BFGS-B', 'TNC', 'SLSQP','Newton-CG'] 
 global f0, sc
 
-def ampgo(objfun, x0, grad=None,hess=None,local='SLSQP',
-          local_opts=None, boundsin=None,
-          maxfunevals=None, totaliter=20, maxiter=10, alphastart=1, tuniter=100,
-          tunphases=0,
-          glbtol=1e-3, 
-          disp=False,plot=False, 
-          fixedvar=None,objargs=None,slack=0.0,
-          minsec=None,minsecgrad=None,tunfun=None,
-          tunfungrad=None,tunfunsec=None,tunfunsecgrad=None,
-          f0fun=None,confun=None,initlambda=False,l0=1,lt0=0,maxrounds=1,
-          plotfuns=[],plotfunscontranges=[],Lmin=np.inf,Leps=0,
-          timelimit=100000,trackfunc=[],
-          Lmultmin=10,Lmulttun=1,alphamu=1.05,tunstrategy=1,minrounds=5,
-          stopfunc=None,almiters=1,cutoff=1.0,dm=1,ineq_min = [],
-          grad_ineq_min = []):
-    # added grad, hess 30 Dec 2019
-    """Search for one or multilple global minima using the tunneling algorithm.
+def stm(x0, objfun, objargs, grad, hess, minsec, minsecgrad,
+        tunfun, tunfungrad, tunfunsec, tunfunsecgrad, confun,
+        local='SLSQP', boundsin=None,
+        maxfunevals=None, totaliter=20, maxiter=10, alphastart=1.0, 
+        tuniter=100, tunphases=0,
+        glbtol=1e-3, slack=0.0,
+        disp=False,plot=False, 
+        f0fun=None,l0=1,lt0=0,maxrounds=1,
+        plotfuns=[],
+        timelimit=100000,trackfunc=[],
+        alphamu=1.05,tunstrategy=1,minrounds=5,
+        stopfunc=None,cutoff=1.0,tundm=1,ineq_min = [],
+        grad_ineq_min = []):
+
+    """Search for one or multiple global minima using the tunneling algorithm.
 
     Parameters
     ----------
-    objfun: callable
-        Objective function to be minimized. objfun(x, *args)
     x0: numpy.ndarray
          Initial guess as starting point
+    objfun: callable
+        Objective function to be minimized. objfun(x, *args)
+    objargs: tuple
+        Arguments to be passed to objective function and its gradient in 
+        minimization phase
     grad: callable
         Gradient of objective function. grad(x,*args)
     hess: callable
         Hessian of objective function. hess(x,*args)
+    minsec: callable
+        Secondary function for minimization phase
+    minsecgrad: callable
+        Gradient of secondary function for minimization phase
+    tunfun: callable
+        Tunneling function
+    gradtunfun: callable
+        Gradient of the tunneling function
+    tunfunsec: callable
+        Secondary tunneling function
+    tunfunsecgrad: callable
+        Gradient of the secondary tunneling function
+    confun: callable
+        Equality constraint function to calculate new lambda (Lk) value
     local: str, optional
         Local minimization method. 'L-BFGS-B' or 'SLSQP' 
-    bounds: sequence, optional
+    boundsin: sequence, optional
         List of tuples of the lower and upper bound for each
         variable [(`xl0`, `xu0`), (`xl1`, `xu1`), ...].
         Only used in minimization phase.
@@ -95,27 +121,65 @@ def ampgo(objfun, x0, grad=None,hess=None,local='SLSQP',
         stop after `totaliter` number of iterations.
     totaliter: int, optional
         Maximum number of global iterations.
+    maxiter: int, optional
+        XXX
+    alphastart: int, optional
+        Initial step size alpha_0 value
+    tuniter: inter, optional
+        Max number of iterations allowed per tunneling phase
     tunphases: int, optional
         Maximum number of tunneling phases per start point, i.e. maximum 
         number of random start points to try
     glbtol: float, optional
         Tolerance whether or not to accept a solution after a tunneling phase.
+    slack: float, optional 
+        Tunneling slack variable
     disp: bool, optional
-        Set to True to print convergence messages.
-    slack: tunneling slack variable
-    objargs: tuple
-        Arguments to be passed to objective function and its gradient in 
-        minimization phase. Duplicate and change to lower min for tunneling.
-    Lmin: minimum value for lambda to reach
-    Leps: small epsilon value to increase lambda value
-    timelimit: wall clock time limit in seconds, evaluated at minimization phase
-    Lmultmin: multiplying factor to increase Lagrange multiplier each round for minimzation
-    Lmulttun: multiplying factor to increase Lagrange multiplier each round for tunneling
-    tunstrategy: 1-just alpha*r, 2 - alpha*r for 2N, then random to max
-    almiters: whether or not to iterate alpha, muL
+        Set to True to print messages on optimization status
+    plot: bool, optional
+        Set to True to plot outputs
+    f0fun: callable, optional
+        Function to evaluate f0
+    l0: inter, optional
+        Initial pole strength value - Minimization
+    lt0: inter, optional
+        Initial pole strength value - Tunneling
+    maxrounds: inter, optional
+        Max rounds of optimization loop
+    plotfuns: list of callable, optional
+        Functions to plot
+    cutoff: int, optional
+        Cutoff for norm of gradient to be "too flat" in tunneling switching
+    timelimit: int, optional
+        Wall clock time limit in seconds, evaluated at minimization phase
+    trackfunc: list of callables, optional
+        List of functions to track values of during optimization
+    alphamu: float, optional
+        Multiplier used to update mu_L - Lagrangian penalty factor
+    minrounds: int, optional
+        Number of rounds of minimization to perform, recalculating augmented
+        Lagrangian multiplier lambda (Lk) and penalty factor (mu_L) each time
+    tunstrategy: 1 or 2
+        1 = all tunneling start pts are eps from xstar in 
+        random direction, 2 = 2n start pts are eps from xstar in 
+        random direction, rest are random points within bounds
+        (2 requires bounds)
+    stopfunc: callable, optional
+        Optimization stops if stopfunc evaluates to True
+    tundm: 0 or 1
+        Method to calculate search direction in tunneling phase
+        0 = as in [1], 1 = -gradient
+    ineq_min: list of callables
+        Inequality constraint functions used in local minimizer
+    grad_ineq_min: list of callables
+        Gradients of inequality constraint functions used in local minimizer
 
     Returns
- 
+            (minlist, best_f, evaluations,
+             'Maximum number of function evaluations exceeded',
+             (tuncount, success_tunnel),best_x_hist,best_f_hist,trackfunc_hist,\
+             argsmin,\
+                 tabulist,round_hist,minhist_all,tunphase_hist)
     """
     timestart = time.time()
     # global f0, switchcount
@@ -143,43 +207,38 @@ def ampgo(objfun, x0, grad=None,hess=None,local='SLSQP',
     
     # Initial values
     x0_0 = x0.copy()
-    Lbound1 =  objargs[1] #bounds[-1][0] #should match objargs[1]
-    Lboundt =  objargs[1] #bounds[-1][0]
-    # Lbound1start = bounds[-1][0] # not used
-    # bounds[-1] = (Lbound1 + Leps,np.inf)
+    Lbound1 =  objargs[1] 
+
     if Lbound1 != objargs[1]:
         print('Warning: lambda bounds and argument vector do not match!')
+    
+    # Initialize tracking values
     minlist = [x0]
     startptlist = [x0]
     tabulist = []
-    startptlist_hist = [startptlist]
-    best_f = np.array([np.inf])#np.array([objfun(x0,*objargs)])#np.array([np.inf])
+    startptlist_hist = [startptlist] # tracking start point lists
+    best_f = np.array([np.inf])
     best_x = x0
-    best_x_hist = [] # adding tracker of all best x found
+    best_x_hist = [] # tracking all best x found
     best_x_hist.append(best_x)
-    best_f_hist = [] # adding tracker of all best f found
+    best_f_hist = [] # tracking all best f found
     best_f_hist.append(best_f[0])
     round_hist = [0]
     tunphase_hist = []
-    trackfunc_hist = []
+    trackfunc_hist = [] # tracking function values
     trackfunc_hist = record_trackfuncs(x0,objargs,trackfunc,trackfunc_hist)
-    mulist = []
-    lambda_laglist = []
-    rplist = []
+    mulist = [] # tracking mu
+    lambda_laglist = [] # tracking Lagrangian multiplier lambda values
     tuncount = 0 # count how many successful tunneling phases
     minhist = {} # dictionary to track minimization phase history
     minhist_all = {}
 
     global_iter = 0
-    all_tunnel = success_tunnel = 0
+    success_tunnel = 0
     evaluations = 0
-
-    local_tol = min(1e-2, glbtol)
     
-    figcount = 0
-    mumin = list(objargs)[0] #problem-dependent 
-    mu = list(objargs)[0] #first value
-    lambda_lag = list(objargs)[1] # lagrange multiplier lambda
+    mumin = list(objargs)[0] # problem-dependent 
+    mu = list(objargs)[0] # first value
     #rp = list(objargs)[2] # lagrange multiplier penalty rp
     mucount = 1
     
@@ -194,26 +253,22 @@ def ampgo(objfun, x0, grad=None,hess=None,local='SLSQP',
         print('Warning: starting mu value is less than minimum value.')
     # The outer loop iteratively decreases mu (log barrier multiplier)
     while check_stop(icount,maxrounds,timestart,timelimit,minlist,stopfunc,*argsmin):
-        slack = slack # problem-dependent (how close are min to constraints?)
-        # glbtol = 1*10**-(icount+3)# problem-dependent !!!
+        slack = slack # problem-dependent !!!
         # Update mu and lambda_min values in Min Phase args
         arglst = list(argsmin) 
         arglst[0] = mu
-        arglst[1] = Lbound1 # SET NEW LOWER BOUND
-        #arglst[2] = rp
-        # arglst[3] = muLk1
+        arglst[1] = Lbound1 
         argsmin = tuple(arglst)
         # Update mu in tun args
         arglstt = list(argstun)
         arglstt[0] = mu
         argstun = tuple(arglstt)
-        tp_total = tunphases
         tp_used = 0
 
         # Initialize lists for start points, minima, tabu pts
         startptlistnew = []
 
-        if icount > 0: #if trying another random pt, keep minlist and tabulist(?), best_f
+        if icount > 0: #if trying another random pt
             boundlow = []
             boundhigh = []
             if boundsin == None:
@@ -226,11 +281,8 @@ def ampgo(objfun, x0, grad=None,hess=None,local='SLSQP',
             startptlist = [x0]
             for mm in minlist:
                 startptlist.append(mm)
-            startptlistnew = minlist.copy() #?
-            # startptlist.append(-1*minlist)
+            startptlistnew = minlist.copy() 
             print('\nNew x0: ',x0)
-
-        # '''
         
         startcount = 1
         print('\n{0}\nRound #{1:d} \n Current mu: {2} \n Current lambda_lag: {4:3.2f} \n '
@@ -268,7 +320,6 @@ def ampgo(objfun, x0, grad=None,hess=None,local='SLSQP',
                 arglst[2] = f0_update
                 argsmin = tuple(arglst)
                 x0copy = x0.copy()
-                # x0copy[-1] = Lk2 + Leps
                 xf, yf = choosemin(xstarn1,x0copy,objfun,argsmin2)
 
                 if isinstance(yf, np.ndarray):
@@ -279,38 +330,31 @@ def ampgo(objfun, x0, grad=None,hess=None,local='SLSQP',
                 # new min
                 trytunnel = True
                 best_x, best_f, best_x_hist, best_f_hist, minlist,\
-                    startptlistnew,round_hist, trackfunc_hist, tp_total,\
+                    startptlistnew,round_hist, trackfunc_hist,\
                     nonewpt, trytunnel, success_tunnel, esc_attempt = evaluate_results(xf,yf,\
                                      best_x,best_f,\
                                      lt0,minlist,tabulist,startptlistnew, \
                                      argsmin2,trackfunc,trackfunc_hist,\
                                      best_x_hist,best_f_hist,round_hist,icount,\
-                                     glbtol,tp_total,tp_used,findzero,\
+                                     glbtol,tp_used,findzero,\
                                      success_tunnel,tunphases,\
                                      esc_attempt,nonewpt,trytunnel)
-                        
-                # if maxfunevals <= 0: #!!!
-                #     #nonewpt = 1
-                #     if disp: print('='*30) #changed from 72 to 30            
+                                   
                    
                 # Tunneling
                 if trytunnel == True and tunphases != 0 and check_stop(icount,maxrounds,timestart,timelimit,minlist,stopfunc,*argsmin):
-                    # try:#!!!
-    
                     topphases = str(mucount) + '-' + str(startcount) + '-' + str(stepcount)
 
                     x0tun = xf.copy()
-                    minlisttun = minlist # use numpy copy for list of arrays
-                    tabulisttun = np.copy(tabulist) # use numpy copy for list of arrays
+                    minlisttun = minlist 
 
                     # Update f0
                     if f0fun != None:
                         xf0 = best_x.copy()
-                        # xf0[-1] = argstun[1] + 0.1
                         f0tun = f0fun(xf0,*argstun)
                         print('f0tun: ',f0tun)
                         arglst2 = list(argstun) 
-                        arglst2[2] = f0tun #objfun(best_x,*argstun)
+                        arglst2[2] = f0tun 
                         argstun = tuple(arglst2)
                     else:
                         arglst2 = list(argstun)
@@ -328,9 +372,8 @@ def ampgo(objfun, x0, grad=None,hess=None,local='SLSQP',
                                                  attempts=tunphases,
                                                  plot=plot,l0=l0*(1+esc_attempt),lt0=lt0,
                                                  plotfuns=plotfuns,
-                                                 plotfunscontranges=plotfunscontranges,
                                                  tunstrat=tunstrategy,
-                                                 dirmethod=dm,cutoff=cutoff)
+                                                 dirmethod=tundm,cutoff=cutoff)
                     tp_used = findzero[-1] #used tunneling phases
                     tunphase_hist.append(tp_used)
  
@@ -343,13 +386,11 @@ def ampgo(objfun, x0, grad=None,hess=None,local='SLSQP',
                         print('tunneled to x: ',findzero[0])
                         print('tunneled f(x) = ',objfun(np.around(findzero[0],2),*argsmin))
                         print('T(x) = ',findzero[1])
-                        #improve = 1
                         xf = findzero[0]
                         yf = objfun(xf,*argsmin)
                         nonewpt = 0
 
                     else: #unsuccessful tunnel
-                        #improve = 0
                         nonewpt = 1 #no further new points
             
                     # except: #if there was error in tunneling
@@ -358,24 +399,7 @@ def ampgo(objfun, x0, grad=None,hess=None,local='SLSQP',
                     #     break
                 
                 global_iter += 1
-                '''
-                if global_iter >= totaliter:
-                    print('Maximum number of global iterations exceeded. \n')
-                    print('best_x_hist: ',best_x_hist)
-                    print('best_f_hist: ',best_f_hist)
-                    print('Min list: ',minlist)
-                    if nonewpt == 0:
-                        print('Warning! New point added to start list but not tunneled from.')
-                        warn_iter = 1
-                       # if not np.any(np.isclose(xf,startptlistnew,atol=1e-2),axis=0).all():
-                        startptlistnew.append(xf)
-                    #print('\n converted minlist: ',minlist)
-                    nonewpt = 1
-                '''
-#                    return (best_x, best_f, evaluations,
-#                            'Maximum number of global iterations exceeded',
-#                            (all_tunnel, success_tunnel),best_x_hist,best_f_hist)
-                    
+
                 if isinstance(yf, np.ndarray):
                             yf = yf[0]
         
@@ -393,7 +417,7 @@ def ampgo(objfun, x0, grad=None,hess=None,local='SLSQP',
                 x0 = xf
                 stepcount += 1    
             if disp:
-                print('='*30) #changed to 30 from 72
+                print('='*30) 
     
             global_iter += 1
             x0 = xf.copy()
@@ -401,8 +425,7 @@ def ampgo(objfun, x0, grad=None,hess=None,local='SLSQP',
         # Update constraint multipliers
         mulist.append(mu)
         lambda_laglist.append(lambda_laglist)
-        #rplist.append(rp)
-        mu = mu/20 #changed from /10 june 13 2022
+        mu = mu/20 
         mucount += 1
 
         icount += 1
@@ -437,15 +460,14 @@ def ampgo(objfun, x0, grad=None,hess=None,local='SLSQP',
                 'Maximum number of function evaluations exceeded',
                 (tuncount, success_tunnel),best_x_hist,best_f_hist,trackfunc_hist,\
                 argsmin,\
-                    tabulist,round_hist,minhist_all,tunphase_hist)\
+                    tabulist,round_hist,minhist_all,tunphase_hist)
                 
 
 def tunnel_exp2(x,fixed,lstar,lm,lt,movelist=[],tabulist=[],*args):
-    #tunnel_exp2(x,fixed,lstar,lm,lt,movelist=[],tabulist=[],*args,**kws):
     """
     Exponential tunneling function
 
-    Uses exponential tunneling method to create poles.
+    Uses exponential tunneling method to create poles from [1]
     S. Gomez and C. Barron, “The exponential tunneling method,” Ser. Reportes 
     Investig. IIMAS, vol. 1, no. 3, 1991.
     
@@ -483,7 +505,6 @@ def tunnel_exp2(x,fixed,lstar,lm,lt,movelist=[],tabulist=[],*args):
 
 @jit('f8(f8[:],f8,f8,f8[:,:],f8[:])',nopython=True,cache=True) 
 def tunnel_exp2_sub(x,fdiff,aspiration,ptlist,polelist):
-    #tunnel_exp2(x,fixed,lstar,lm,lt,movelist=[],tabulist=[],*args,**kws):
     """Tunneling objective function. Exponential version.
         Compiled sub-function to improve speed.
     """
@@ -500,13 +521,10 @@ def tunnel_exp2_sub(x,fdiff,aspiration,ptlist,polelist):
     return ytf 
 
 def grad_tunnel_exp2(x,fixed,lstar,lm,lt,movelist=[],tabulist=[],*args):
-    #(x,fixed,lstar,lm,lt,movelist=[],tabulist=[],
-                    # *args,**kws):
+
     """Gradient of exponential tunneling function
  
-    Uses exponential tunneling method to create poles.
-    S. Gomez and C. Barron, “The exponential tunneling method,” Ser. Reportes 
-    Investig. IIMAS, vol. 1, no. 3, 1991.
+    Uses exponential tunneling method to create poles. [1]
     
     x0 = x value to calculate T(x) at
     fixed = list, [objfun,gradfun,aspiration,slack,tabulist,objargs] 
@@ -536,17 +554,6 @@ def grad_tunnel_exp2(x,fixed,lstar,lm,lt,movelist=[],tabulist=[],*args):
     poles2 = lm * np.ones(len(movelist)) 
     poles3 = lt * np.ones(len(tabulist))
     polelist = np.concatenate((poles1,poles2,poles3))
-    # for xmin in minlist:
-    #     ptlist.append(xmin)
-    #     polelist = np.append(polelist,lstar)
-    
-    # for xm in movelist:
-    #     ptlist.append(xm)
-    #     polelist = np.append(polelist,lm)
-    
-    # for xt in tabulist:
-    #     ptlist.append(xt)
-    #     polelist = np.append(polelist,lt)
     
     grad_tunnel = grad_tunnel_exp2_sub(x,fx,gradfx,aspiration,np.array(ptlist),polelist)
     
@@ -554,8 +561,6 @@ def grad_tunnel_exp2(x,fixed,lstar,lm,lt,movelist=[],tabulist=[],*args):
 
 @jit('f8[:](f8[:],f8,f8[:],f8,f8[:,:],f8[:])',nopython=True,cache=True) 
 def grad_tunnel_exp2_sub(x,fx,gradfx,aspiration,ptlist,polelist):
-    #(x,fixed,lstar,lm,lt,movelist=[],tabulist=[],
-                    # *args,**kws):
     """Gradient of exponential tunneling function
         Compiled sub-function to improve speed
     """
@@ -570,7 +575,6 @@ def grad_tunnel_exp2_sub(x,fx,gradfx,aspiration,ptlist,polelist):
         pole = polelist[p]
         exp_product_all = exp_product_all * np.exp(pole/np.linalg.norm(xdiff))
 
-    
     grad_tunnel = gradfx * exp_product_all
     
     for p2 in range(0,len(ptlist)):
@@ -586,8 +590,8 @@ def perform_tunneling(xstar,f,gradf,f2,gradf2,argstun,minlist,bounds=None,
                       slack=0,alpha0=1,attempts=None,tol=1e-3,
                       plot=False,dirmethod=1,eps1=1e-2,
                       l0=0.5,lt0=0,plotfuns=[],
-                      plotfunscontranges=[],tunstrat=1,cutoff=1.0):
-    """Find zeros using method from exponential tunneling paper.
+                      tunstrat=1,cutoff=1.0,pltrange = []):
+    """Find zeros using method from [1]
     xstar = current best value, x*
     f = callable, objective function
     gradf = callable, gradient of objective function
@@ -596,8 +600,8 @@ def perform_tunneling(xstar,f,gradf,f2,gradf2,argstun,minlist,bounds=None,
     slack = slack value, accept points where T(x) <= slack (rather than <= 0)
     objargs = tuple, args passed to objfun and gradfun
     maxiter = maximum number of tunneling steps
-    numphases = number of tunneling phases (if 0, defualts to 2 x number of design variables)
-    tol =
+    numphases = number of tunneling phases (if 0, defaults to 2 x number of design variables)
+    tol = tolerance value
     topphase = top optimization phase number
     plot = boolean, plot iteration history or not
     dirmethod = method to calculate direction (0 = as in exp tunneling paper,
@@ -621,7 +625,7 @@ def perform_tunneling(xstar,f,gradf,f2,gradf2,argstun,minlist,bounds=None,
     f2star = f2(minlist[0],*argstun);
     fixed2 = [f2,gradf2,f2star,slack,minlist] + list(argstun)
 
-    fixed = [fixed1,fixed2] # list of fixeds
+    fixed = [fixed1,fixed2] # list of fixed variables
     func = 0 #which function to use; start with primary
 
     fixed_pf = []
@@ -640,27 +644,27 @@ def perform_tunneling(xstar,f,gradf,f2,gradf2,argstun,minlist,bounds=None,
     
     # Generate r_matrix and x0_matrix according to tunstrat
     r_matrix, x0_matrix = generate_r_x0(xstar,lstar,attempts,tunstrat,bounds = [])
-    epsilon0 = lstar/np.log(100)#max(lstar/np.log(100),1e-3)
+    epsilon0 = lstar/np.log(100)
     
     # Outer loop - total number of allowed attempts
     tp, found = 0, False
 
-    # While you still have attempts left and haven't found a zero
+    # While attempts remain and haven't found a zero
     while tp < attempts and found == False:
         #
         x0, r = x0_matrix[tp], r_matrix[tp]
         nancheckct = 0 # check if stepping out of bounds
         epsilon = epsilon0
         # Recording lists
-        xklist, Tklist, gTf1klist, gTf2klist, Tf1klist, Tf2klist, fklist, Hf1klist, \
-        Hf2klist, alphalist,\
-        xmlist,xmiterlist, which = [], [], [], [], [], [], [], [], [], [], [], [], []
+        xklist, Tklist, gTf1klist, gTf2klist, Tf1klist, Tf2klist, fklist, \
+        alphalist,xmlist,xmiterlist, \
+        which = [], [], [], [], [], [], [], [], [], [], [], [], []
 
         alphalist.append(np.array([0]))
-        #
+        
         # Reset values
         eta, xm = 0.0, [] # no moveable poles to start
-        #
+        
         # Print Status
         print('\n{0} \n Tunneling Phase {1}-{2}\
               \n Current x* = {3} \n Minlist = {4} \
@@ -702,10 +706,7 @@ def perform_tunneling(xstar,f,gradf,f2,gradf2,argstun,minlist,bounds=None,
                 print('Increased initial perturbation size')
 
         # Record fist step values
-        # k, xk, Hf1k, Hf2k = 0, x0, np.identity(numvars), np.identity(numvars) #initial values
         k, xk = 0, x0
-        # Hf1k = np.zeros([numvars,numvars])
-        # Hf2k = np.zeros([numvars,numvars])
         Tk = T(x0,fixed[func],lstar,eta,ltabu,movelist=xm,tabulist=tabulist)
         Tf1k = T(x0,fixed[0],lstar,eta,ltabu,movelist=xm,tabulist=tabulist)
         Tf2k = T(x0,fixed[1],lstar,eta,ltabu,movelist=xm,tabulist=tabulist)
@@ -714,12 +715,11 @@ def perform_tunneling(xstar,f,gradf,f2,gradf2,argstun,minlist,bounds=None,
         
         xklist.append(x0), Tklist.append(Tk), gTf1klist.append(gTf1k),gTf2klist.append(gTf2k),
         Tf1klist.append(Tk), Tf2klist.append(Tf2k),fklist.append(f(x0,*argstun)), which.append(func)
-        # Hf1klist.append(Hf1k),Hf2klist.append(Hf2k)
         
         # Print initial step info
         if disp == True: print_tun_step(k,x0,f(x0,*argstun),f2(x0,*argstun),gradf2(x0,*argstun),\
                                         Tf1k,Tf2k,gTf1k,gTf2k,0,0,func)
-        #
+        
         # Find good lambdastar, lstar (pole strength at x*)    
         d = direction(dirmethod,Tf1k,gTf1k,xk)#,Hf1k)
         while np.dot(d,gT(x0,fixed[func],lstar,eta,ltabu,movelist=xm,tabulist=tabulist)) >= -.5 and \
@@ -734,15 +734,14 @@ def perform_tunneling(xstar,f,gradf,f2,gradf2,argstun,minlist,bounds=None,
         # Begin zero search
         nan = False
         while k < maxiter and found == False and nan == False:
-            # Check if we reached a good tunnel point (<= 0)
+            # Check if reached a good tunnel point (<= 0)
             if T(xk,fixed[func],lstar,0,ltabu,movelist=xm,tabulist=tabulist) <= slack:
                 found == True
                 # Print current step info
                 print('Found good tunneling point: {0}\nTk: {1}\nIterations: {2}'\
                       .format(np.around(xk,5),np.around(Tk,3),k))
-                # Plot code 1
+
                 if plot == True:
-                    pltrange = [-.03,.03]
                     plot_iter_history_contour(f,argstun,fixed[0],lstar,
                                               eta,ltabu,pltrange,pltrange,xklist,which,
                                               res=[100,100],decplaces=3,contrange=[0,10],
@@ -764,58 +763,38 @@ def perform_tunneling(xstar,f,gradf,f2,gradf2,argstun,minlist,bounds=None,
                 # Return found point
                 return xk,T(xk,fixed[0],lstar,0,ltabu,movelist=xm,tabulist=tabulist),True,tp
 
-           # Check if need to move moveable pole closer to current iteration
-                '''
-            if np.size(xm) != 0 and eta != 0:
-                if np.linalg.norm(xk - xm) > 1.25*epsilon:
-                    #print('Move pole closer')
-                    xm = [xk - 100*eta*epsilon*((xk - xm[0])/np.linalg.norm(xk - xm[0]))]
-                    if disp == True:
-                        print('Move pole closer')
-                '''
             # Find new step (size and direction)
             step_attempt, newstepfound, maxstep = 0, False, 5
 
             while newstepfound == False and step_attempt <= maxstep:
                 # Default to primary function
                 func = 0
-                gTf2knorm = np.linalg.norm(gTf2k)
                 gf2norm = np.linalg.norm(gradf2(xk,*argstun))  
                 # If gradient is very flat, try using function 2 to
                 # get direction instead
-                if f2 != None and gf2norm >= cutoff: #gTf2knorm >= 2.0:
+                if f2 != None and gf2norm >= cutoff: 
                     # Switch to secondary function
                     if disp == True: print('Switch on, using f2')  
                     func = 1
                     if eta == 0:
-                        d = direction(dirmethod,Tf2k,gTf2k,xk)#,Hf2k)  
-                        # d = direction(1,Tf2k,gTf2k,xk,Hf2k)  
+                        d = direction(dirmethod,Tf2k,gTf2k,xk)  
                     else:
-                        d = direction(1,Tf2k,gTf2k,xk)#,Hf2k)
+                        d = direction(1,Tf2k,gTf2k,xk)
                      
                 else:
                     # Calculate direction
                     if eta == 0: 
-                        d = direction(dirmethod,Tf1k,gTf1k,xk)#,Hf1k)
-                        
+                        d = direction(dirmethod,Tf1k,gTf1k,xk)
                     else:
-                        d = direction(1,Tf1k,gTf1k,xk)#,Hf1k)
-                    # # Calculate gradient of T(xk)
-                    # gTk = gT(xk,fixed[func],lstar,0,ltabu,
-                    #                      movelist=xm,tabulist=tabulist)                        
-                #
+                        d = direction(1,Tf1k,gTf1k,xk)
+
                 # Check if d is nan
                 if np.isnan(d).any():
                     print('Exit: Nan problem')
-                    nanproblem, k = True, maxiter
-                '''
-                # Check if moveable pole can be turned off   - old position 
-                '''
+                    k = maxiter
+
                 # Compute step size alpha
                 alpha,alphaiter,maxbisect = alpha0, 0, 7 #starting value may depend on problem
-                #
-                # if func == 1: maxbisect = 10
-                # added 4/2022 - if infeasible value, try smaller step size
                 xk1 = xk + alpha*d
                 Tk = T(xk,fixed[func],lstar,eta,ltabu,movelist=xm,tabulist=tabulist)
                 Tk1 = T(xk1,fixed[func],lstar,eta,ltabu,movelist=xm,tabulist=tabulist)
@@ -844,12 +823,9 @@ def perform_tunneling(xstar,f,gradf,f2,gradf2,argstun,minlist,bounds=None,
                     else:
                         # Create moveable pole
                         xm, eta = [xk], deltaeta
-                        # Depending on problem, can tell next iteration to
-                        # move away from starting point
-                        #d = (xm-xstar)/np.linalg.norm(xm-xstar)
 
                         # Generate new random point (Gomez 1991)
-                        epsilonm = (np.finfo(np.float).eps*10**7)**(1/10) #* (1 + np.linalg.norm(xstar))
+                        epsilonm = (np.finfo(np.float).eps*10**7)**(1/10) 
                         tolf = np.finfo(float).eps*10**7
                         epsilonm = 2*(tolf**(1/5))*(1+np.linalg.norm(xk))
 
@@ -885,7 +861,7 @@ def perform_tunneling(xstar,f,gradf,f2,gradf2,argstun,minlist,bounds=None,
                         gTf1k1 = gT(xk1,fixed[0],lstar,eta,ltabu,movelist=xm,tabulist=tabulist)
                         gTf2k1 = gT(xk1,fixed[1],lstar,eta,ltabu,movelist=xm,tabulist=tabulist)
                         # Print current step info
-                        if disp == True: #???????
+                        if disp == True: 
                             print('Moveable pole added')
                             print_tun_step(k+1,xk1,f(xk1,*argstun),f2(xk1,*argstun),gradf2(xk1,*argstun),Tf1k1,\
                                            Tf2k1,gTf1k1,gTf2k1,eta,alphaiter,func)
@@ -903,17 +879,13 @@ def perform_tunneling(xstar,f,gradf,f2,gradf2,argstun,minlist,bounds=None,
                 # if not at singular point, can take step
                 else:
                     newstepfound = True
-                    # Update values
-                    # xk1 = xk + alpha * d 
-                    # Tk1 = T(xk1,fixed[func],lstar,eta,ltabu,movelist=xm,tabulist=tabulist)
                     Tf1k1 = T(xk1,fixed[0],lstar,eta,ltabu,movelist=xm,tabulist=tabulist)
                     Tf2k1 = T(xk1,fixed[1],lstar,eta,ltabu,movelist=xm,tabulist=tabulist)
                     gTf1k1 = gT(xk1,fixed[0],lstar,eta,ltabu,movelist=xm,tabulist=tabulist)
                     gTf2k1 = gT(xk1,fixed[1],lstar,eta,ltabu,movelist=xm,tabulist=tabulist)
 
                     # Print current step info
-                    if disp == True: #???????
-                        # Tk1_1 = T(xk1,fixed[0],lstar,0,ltabu,movelist=xm,tabulist=tabulist)
+                    if disp == True: 
                         print_tun_step(k+1,xk1,f(xk1,*argstun),f2(xk1,*argstun),gradf2(xk1,*argstun),Tf1k1,\
                                        Tf2k1,gTf1k,gTf2k1,eta,alphaiter,func)
                     # Record new step
@@ -937,10 +909,7 @@ def perform_tunneling(xstar,f,gradf,f2,gradf2,argstun,minlist,bounds=None,
                         elif f(xk,*argstun) < 0 and f(xk,*argstun) < 1.1*f(xm[0],*argstun): #negative
                             eta = 0 #turn off moveable pole
                             if disp == True: print('Moveable pole turned off')
-                            # elif np.dot(np.dot(d,gT(xk,fixed,lstar=lambdastar,lm=0,movelist=xm,disp=False)),(xk - xm)) > 0:
-                            #     eta = 0
-                            #     print('Moveable pole turned off')      
-                        
+
                     # Set new xk,Tk,gTk for next step
                     xk, Tk, gTf1k, gTf2k = xk1, Tk1, gTf1k1, gTf2k1
 
@@ -949,41 +918,18 @@ def perform_tunneling(xstar,f,gradf,f2,gradf2,argstun,minlist,bounds=None,
                 step_attempt += 1
                 if step_attempt > maxstep:
                     print('No good step further \nIterations: ',k)
-                    # if plot == True:
-                    #     plot_iter_history_contour(f,argstun,fixed[0],lstar,
-                    #                               eta,ltabu,[-.1,.1],[-.1,.1],xklist,which,
-                    #                               res=[100,100],decplaces=3,contrange=[0,10],
-                    #                               background='contourtunnel',topphase=topphase,
-                    #                               tunphase=tp,minlist=minlist,movelist=xmlist,tabulist=tabulist,
-                    #                               msg='Function 1 - No zero found')
-                    #     plot_iter_history_contour(f2,argstun,fixed[1],lstar,
-                    #                               eta,ltabu,[-.1,.1],[-.1,.1],xklist,which,
-                    #                               res=[100,100],decplaces=3,contrange=[0,5],
-                    #                               background='contourtunnel',topphase=topphase,
-                    #                               tunphase=tp,minlist=minlist,movelist=xmlist,tabulist=tabulist,
-                    #                               msg='Function 2 - No zero found')
                     k = maxiter
-                    # plot code 2
                     break
-            #
+            
             # Stop if max number of iterations reached    
             if k >= maxiter and step_attempt > maxstep:
                 print('Maximum number of iterations reached. \n Iterations: {0}\
                       \nSlack: {1} \nMin val: {2:6.5f}'.format(k,slack,min(Tf2klist)))
-                # plot code 3
         tp += 1
-        # plot code 4
-
-    ''' Turn on if you want to print iteration hist or 
-    moveable pole history over a certain design variable
-    for iter in xklist: 
-        xklist1.append(iter[0])
-    for iterm in xmlist:
-        xmlist1.append(iterm[0])
-    '''
-
+        
     print('No new tunneling point found at this starting point.\
           \nSlack: {0} \nMin val: {1:6.5f}'.format(slack,min(Tf2klist)))
+          
     return xk1, Tk1, False, tp
 
 def generate_r_x0(xstar,lstar,attempts,tunstrat,bounds = []):
@@ -1021,7 +967,7 @@ def generate_r_x0(xstar,lstar,attempts,tunstrat,bounds = []):
     
     # Make matrix of initial points in random search directions
     x0_matrix = np.zeros([attempts,numvars]) #initialize matrix
-    epsilon0 = lstar/np.log(100)#max(lstar/np.log(100),1e-3)
+    epsilon0 = lstar/np.log(100)
     # Strategy 1 points
     for rr in range(0,attempts1):
         x0_matrix[rr] = xstar + r_matrix[rr]*epsilon0
@@ -1037,82 +983,25 @@ def generate_r_x0(xstar,lstar,attempts,tunstrat,bounds = []):
     return r_matrix,x0_matrix
 
 @jit('f8[:](i8,f8,f8[:],f8[:])',nopython=True,cache=True)         
-def direction(method,Tk,gTk,xk): #,Hk=np.identity(1)):
+def direction(method,Tk,gTk,xk): 
     # Different ways to calculate step direction
     # Exponential paper or simple gradient
-    '''
-    d = -T(x0,fixed,lstar=lambdastar,lm=eta,movelist=xm,disp=False) \
-        * gT(x0,fixed,lstar=lambdastar,lm=eta,movelist=xm,disp=False) / \
-        (np.linalg.norm(gT(x0,fixed,lstar=lambdastar,lm=eta,movelist=xm,disp=False))**2)                    
-    d = d/np.linalg.norm(d) #adding normalizing d
-    d0 = -T(x0,fixed,lstar=lambdastar,lm=eta,movelist=xm,disp=False) \
-        * gT(x0,fixed,lstar=lambdastar,lm=eta,movelist=xm,disp=False) / \
-        (np.linalg.norm(gT(x0,fixed,lstar=lambdastar,lm=eta,movelist=xm,disp=False))**2)
-    d2 = gT(x0,fixed,lstar=lambdastar,lm=eta,movelist=xm,disp=False) / \
-        (np.linalg.norm(gT(x0,fixed,lstar=lambdastar,lm=eta,movelist=xm,disp=False))**2)
-    d2 = -d2/np.linalg.norm(d2)
-    d3 = -gT(x0,fixed,lstar=lambdastar,lm=eta,movelist=xm,disp=False)
-    d3 = d3/np.linalg.norm(d3)
-    '''
-    if method == 0: # exponential tunneling paper direction
+
+    if method == 0: # [1] direction
         d = - Tk * gTk / (np.linalg.norm(gTk)**2)
     elif method == 1: # gradient method
         d = - gTk
-    #elif method == 2:
-    #    d = - np.dot(Hk,gTk)
+
     # normalize
     nsum = 0
     for el in d: nsum += el**2
     n = np.sqrt(nsum)
     return d * (1/n)
-    # elif method == 2: #BFGS
-    #     dd = np.dot(Hk,gTk)
-    #     n = 
-    #     return -np.dot(dd,n)
-
-def direction_nojit(method,Tk,gTk,xk,Hk):
-    # Different ways to calculate step direction
-    # Exponential paper or simple gradient
-    '''
-    d = -T(x0,fixed,lstar=lambdastar,lm=eta,movelist=xm,disp=False) \
-        * gT(x0,fixed,lstar=lambdastar,lm=eta,movelist=xm,disp=False) / \
-        (np.linalg.norm(gT(x0,fixed,lstar=lambdastar,lm=eta,movelist=xm,disp=False))**2)                    
-    d = d/np.linalg.norm(d) #adding normalizing d
-    d0 = -T(x0,fixed,lstar=lambdastar,lm=eta,movelist=xm,disp=False) \
-        * gT(x0,fixed,lstar=lambdastar,lm=eta,movelist=xm,disp=False) / \
-        (np.linalg.norm(gT(x0,fixed,lstar=lambdastar,lm=eta,movelist=xm,disp=False))**2)
-    d2 = gT(x0,fixed,lstar=lambdastar,lm=eta,movelist=xm,disp=False) / \
-        (np.linalg.norm(gT(x0,fixed,lstar=lambdastar,lm=eta,movelist=xm,disp=False))**2)
-    d2 = -d2/np.linalg.norm(d2)
-    d3 = -gT(x0,fixed,lstar=lambdastar,lm=eta,movelist=xm,disp=False)
-    d3 = d3/np.linalg.norm(d3)
-    '''
-    if method == 0: # exponential tunneling paper direction
-        d = - Tk * gTk / (np.linalg.norm(gTk)**2)
-    elif method == 1: # gradient method
-        d = - gTk
-    elif method == 2:
-        d = - np.dot(Hk,gTk)
-    # normalize
-    n = np.linalg.norm(d)
-    return d * (1/n)
-    
-@jit('f8[:,:](f8[:],f8[:],f8[:],f8[:],f8[:,:])',nopython=True,cache=True)  
-def calc_Hk(xk,xk1,gTk,gTk1,Hk):
-    # dk = -Hk * gradf(xk)
-    sk = xk1 - xk
-    yk = gTk1 - gTk
-    rhok = 1/np.dot(yk,sk)
-    numvars = len(xk)
-    I = np.identity(numvars)
-    Hk1 = (I - rhok*sk*yk) * Hk * (I - rhok*yk*sk) + rhok*sk*sk
-    return Hk1
 
 def perform_minimization(x0,f,gradf,f2,gradf2,argsmin,minlist,best_x,best_f,mucount,\
                          startcount,stepcount,ineq_min,grad_ineq_min,\
                          bounds=None,minrounds=5,disp=True,\
-                         maxfunevals=3000,confun=None,alphamu=1.05,local='SLSQP',\
-                         trackfunc=None):
+                         maxfunevals=3000,confun=None,alphamu=1.05,local='SLSQP'):
     '''
     Perform minimization phase of tunneling algorithm with switching.
     x0 = start point
@@ -1124,20 +1013,21 @@ def perform_minimization(x0,f,gradf,f2,gradf2,argsmin,minlist,best_x,best_f,muco
     minlist = current list of global minima
     best_x = current x*
     best_f = current f*
-    mucount = counter used in higher function (***FIX)
+    mucount = counter used in higher function
     startcount = start point counter
     stepcount = step counter (***)
+    ineq_min = list of inequality constraint functions
+    grad_ineq_min = list of gradients of inequality constraint functions
     bounds = bounds to be passed to minimizer
     minrounds = how many rounds of minimization to perform, recalculating augmented
-                Lagrange multiplier lambda (Lk) and penatly factor (muL) each time
+                Lagrange multiplier lambda (Lk) and penalty factor (muL) each time
     disp = turns detailed display on/off with True/False
     maxfunevals = max number of function evaluations allowed in minimizer (each call)
     confun = equality constraint function to calculate new lambda (Lk) value
     alphamu = multiplier used to update muL
     local = local minimizer to call, SLSQP or L-BFGS-B
-    trackfunc = functions to track the values of at each round of minimization
     '''
-    mu = argsmin[0] #???
+    mu = argsmin[0] 
     
     # Display phase information:
     print('\n{0}\nStarting MINIMIZATION Phase {1:d}-{2:d}-{3:d}-0 \n Current x* = {4} \n Current minlist: {7} \n Current best_f = {5} \n{0}'
@@ -1147,10 +1037,7 @@ def perform_minimization(x0,f,gradf,f2,gradf2,argsmin,minlist,best_x,best_f,muco
     
     # MINIMIZE
     # Which function to use depends on problem
-    # Use fmin_ functions to more easily access iteration history
-    #res = fmin_slsqp(objfun, x0, args=objargs,fprime=grad,bounds=bounds,
-    #               disp=2,iter=1000,full_output=True,acc=1e-6)
-    
+
     # Set display options
     if disp == True:
         callbackfunc = None #printiter
@@ -1168,7 +1055,6 @@ def perform_minimization(x0,f,gradf,f2,gradf2,argsmin,minlist,best_x,best_f,muco
     ii = 1
     Lk1 = argsmin[1]
     muLk1 = argsmin[3]
-    # minhist_entry = {}
     fminhist, xminhist, minhist = {}, {}, {}
     fminhist[0] = best_f #first minhist entry
     xminhist[0] = x0
@@ -1177,26 +1063,11 @@ def perform_minimization(x0,f,gradf,f2,gradf2,argsmin,minlist,best_x,best_f,muco
    
     arglstmin2 = list(argsmin)
     total_num_fun = 0
-    # Print initial
-    print('\tjj: {0:2d}'.format(0))
-    print('\tLambda: {0:5.3e}'.format(Lk1))
-    print('\tmuL: {0:5.3e}'.format(muLk1))
-    # print('\tf0: {0:5.5e}'.format(f0))
-    print('\tc9: {0:5.3f}'.format(x0[8])) #*180/np.pi)
-    print('\tc10: {0:5.3f}'.format(x0[9])) #*180/np.pi)
-    print('\tth1: {0:5.3f}'.format(x0[-2]*180/np.pi))
-    print('\tth2: {0:5.3f}'.format(x0[-1]*180/np.pi))
-    # print('\tc11: ',x02[10])
-    print('\tEnergy: {0:5.3e}'.format(confun(x0,*argsmin)))
-    print('\tShape: ',trackfunc[1](x0,*argsmin))
-    print('\ty*: {0:5.3e}'.format(best_f[-1]))
-    print('\tobjfun: {0:5.3e}'.format(f(x0,*argsmin)))
+
     # Perform rounds of minimization
-    # Outer for loop: Lk (lambda multiplier) and muLk (penalty factor) are 
-    # updated
+    # Outer for loop: Lk (lambda multiplier) and muLk (penalty factor) are updated
     for jj in range(0,minrounds):
         # Update Lk and muLk
-        # arglstmin2 = list(argsmin2)
         # old values
         Lk1 = arglstmin2[1]
         muLk1 = arglstmin2[3]
@@ -1211,17 +1082,16 @@ def perform_minimization(x0,f,gradf,f2,gradf2,argsmin,minlist,best_x,best_f,muco
         # save new values into args
         arglstmin2[1] = Lk2
         arglstmin2[3] = muLk2
-        # argsmin2 = tuple(arglstmin2)
 
         # Set accuracy value - increases with increasing rounds (i.e. as you
         # approach a min)
-        accslsqp = 1*10**-(10+jj) # make it get more accurate?
+        accslsqp = 1*10**-(10+jj) 
         
         converge = False
         
         minhist_entry = {}
         
-        switch = 0 #? Start with switch off
+        switch = 0 # Start with switch off
         
         # Inner loop: repeat minimization with current params until convergence
         while converge == False and ii < minroundsconv:
@@ -1277,23 +1147,6 @@ def perform_minimization(x0,f,gradf,f2,gradf2,argsmin,minlist,best_x,best_f,muco
             
             # Update num_fun
             total_num_fun += num_fun
-            
-            # Print results from this round
-            print('\tjj: {0:2d}'.format(jj+1))
-            print('\tLambda: {0:5.3e}'.format(Lk2))
-            print('\tmuL: {0:5.3e}'.format(muLk2))
-            print('\tf0: {0:5.5e}'.format(f0))
-            print('\tc9: {0:5.3f}'.format(x02[8])) #*180/np.pi)
-            print('\tc10: {0:5.3f}'.format(x02[9])) #*180/np.pi)
-            print('\tth1: {0:5.3f}'.format(x02[-2]*180/np.pi))
-            print('\tth2: {0:5.3f}'.format(x02[-1]*180/np.pi))
-            # print('\tc11: ',x02[10])
-            print('\tEnergy: {0:5.3e}'.format(confun(x02,*argsmin2)))
-            print('\tShape: ',trackfunc[1](x02,*argsmin2))
-            print('\titers: {0:5d}'.format(num_fun))
-            print('\tswitch: {0}'.format(switch))
-            print('\ty*: {0:5.3e}'.format(y02))
-            print('\tobjfun: {0:5.3e}'.format(f(x02,*argsmin2)))
           
             # Check convergence and if switching turns on
             deltaf = np.abs(fstarn - fstarn1)
@@ -1331,27 +1184,7 @@ def plot_iter_history(topphase,tunphase,xmin,k,xklist,fklist,Tklist,xmiterlist,x
     '''
     # Max y-value for tunneling function value
     Tmax = min(max(Tklist),800)
-    '''
-    # Plot x* vs. iterations 
-    fig, ax1 = plt.subplots()
-    plt.title('Tunneling Phase {0}-{1} x* = {2}'.format(topphase,tunphase,round(xmin[0],3)))
-    color = 'tab:orange'
-    ax1.set_xlabel('Iteration')
-    ax1.set_ylabel('x_k',color=color)
-    ax1.scatter(np.arange(0,k+1),xklist,color=color)
-    ax1.tick_params(axis='y',labelcolor=color)
-    color = 'tab:pink'
-    ax1.scatter(xmiterlist,xmlist,color=color,marker='^')
-    ax2 = ax1.twinx() # create second y axis with same x axis
-    color = 'tab:blue'
-    ax2.set_ylabel('T(x)',color=color)
-    ax2.plot(np.arange(0,k+1),Tklist,color=color)
-    ax2.set_ylim([0,Tmax])
-    #ax2.set_yscale('log')
-    ax2.tick_params(axis='y',labelcolor=color)
-    fig.tight_layout()
-    plt.show()
-    '''
+
     # Plot with f(x)
     fig, ax1 = plt.subplots()
     plt.title('Tunneling Phase {0}-{1} x* = {2}'.format(topphase,tunphase,round(xmin[0],3)))
@@ -1362,12 +1195,12 @@ def plot_iter_history(topphase,tunphase,xmin,k,xklist,fklist,Tklist,xmiterlist,x
     ax1.tick_params(axis='y',labelcolor=color)
     ax1.set_ylim([0,Tmax])
     color = 'tab:pink'
-    #ax1.scatter(xmiterlist,xmlist,color=color,marker='^')
+
     ax2 = ax1.twinx() # create second y axis with same x axis
     color = 'tab:purple'
     ax2.set_ylabel('f(x)',color=color)
     ax2.plot(np.arange(0,len(fklist)),fklist,color=color)
-    #ax2.set_yscale('log')
+
     ax2.tick_params(axis='y',labelcolor=color)
     fig.tight_layout()
     plt.show()
@@ -1377,7 +1210,6 @@ def plot_contour_tunnel(fun,fixed,lambdastar,eta,lt,xrange,yrange,contrange=[],
     '''
     Contour plot - works for exponential tunneling function only
     fun = function to be plotted
-    funargs = *() args to pass to fun
     xrange = [xmin xmax]
     yrange = [ymin ymax]
     contrange = bounds for contour scale      
@@ -1397,8 +1229,6 @@ def plot_contour_tunnel(fun,fixed,lambdastar,eta,lt,xrange,yrange,contrange=[],
     cp = ax.contourf(X,Y,Z,np.linspace(contrange[0],contrange[1],51),cmap='viridis')
     fig.colorbar(cp)
     #labeling
-    tlist = []
-    movelistlabel = []
     # for jj in enumerate(minlist): plt.scatter(jj[1][0],jj[1][1],color='tab:orange')
     # for kk in enumerate(movelist): plt.scatter(kk[1][0],kk[1][1],color='tab:pink',marker='^')
     # for ll in enumerate(tabulist): plt.scatter(ll[1][0],ll[1][1],color='tab:blue',marker='*')
@@ -1441,14 +1271,7 @@ def plot_contour(fun,fcnargs,xrange,yrange,contrange=[],res=[10,10],topphase=0,
                 topphase, tunphase,minlist))  
     else:
         plt.title('Tunneling Phase ({0}-{1:d}) \n Minlist:{2} \n{3}'.format(\
-                topphase, tunphase,minlist,msg))
-    #labeling
-    # tlist = []
-    # movelistlabel = []
-    # for jj in enumerate(tabulist): plt.scatter(jj[1][0],jj[1][1],color='tab:orange')
-    # for kk in enumerate(movelist): plt.scatter(kk[1][0],kk[1][1],color='tab:pink',marker='^')
-    #plt.title('Tunneling Phase ({1:d}-{2:d}) \n Tabulist:{3} \n Moveable Poles: {4}'.format(\
-    #      '='*30, topphase, tunphase,tabulist,movelist))                
+                topphase, tunphase,minlist,msg))               
     plt.show
     return fig, ax
 
@@ -1456,7 +1279,7 @@ def plot_text(fun,fcnargs,xrange,yrange,ptslist=[],res=[10,10],decplaces=3,contr
     '''
     Contour plot - works for exponential tunneling function only
     fun = function to be plotted
-    funargs = *() args to pass to fun
+    fcnargs = *() args to pass to fun
     xrange = [xmin xmax]
     yrange = [ymin ymax]
     contrange = bounds for contour scale      
@@ -1487,7 +1310,7 @@ def plot_text_tunnel(fun,fcnargs,xrange,yrange,fixed,lstar=1,lm=0.1,movelist=[],
     '''
     Contour plot - works for exponential tunneling function only
     fun = function to be plotted
-    funargs = *() args to pass to fun
+    fcnargs = *() args to pass to fun
     xrange = [xmin xmax]
     yrange = [ymin ymax]
     contrange = bounds for contour scale      
@@ -1513,8 +1336,6 @@ def plot_text_tunnel(fun,fcnargs,xrange,yrange,fixed,lstar=1,lm=0.1,movelist=[],
     cp = ax.contourf(X,Y,Z,np.linspace(contrange[0],contrange[1],51),cmap='BuPu')
     fig.colorbar(cp)
     plt.show
-#tunnel_exp2(x0,fixed,lstar=1,lm=0.1,movelist=[],disp=False,
-#                *args,**kws)
 
 def plot_iter_history_contour(fun,fcnargs,fixed,lambdastar,eta,lt,xrange,yrange,
                               iterhist,whichlst,ptslist=[],
@@ -1546,7 +1367,7 @@ def plot_iter_history_contour(fun,fcnargs,fixed,lambdastar,eta,lt,xrange,yrange,
     for ii in np.arange(0,len(iterhist)):
         iterx.append(iterhist[ii][0])
         itery.append(iterhist[ii][1])
-        color = ii/(len(iterhist) - 1) #1 - ii/(len(iterhist) - 1)
+        color = ii/(len(iterhist) - 1) 
         if whichlst[ii] == 0:
             face = str(color)
         else:
@@ -1554,25 +1375,10 @@ def plot_iter_history_contour(fun,fcnargs,fixed,lambdastar,eta,lt,xrange,yrange,
         ax.scatter(iterhist[ii][0],iterhist[ii][1], facecolors=face,
                     edgecolors=str(color))
         ax.text(iterhist[ii][0]*1.01,iterhist[ii][1]*1.01,ii)
-        # plt.plot(iterhist[ii][0],iterhist[ii][1],marker='o',
-        #             fillstyle=markerlst[ii],c=[str(color)])
-    cmap = mpl.cm.cool
-    norm = mpl.colors.Normalize(vmin=0, vmax=len(iterhist)-1)
-    # cb1 = mpl.colorbar.ColorbarBase(ax, cmap=cmap,
-    #                                 norm=norm,
-    #                                 orientation='vertical')
-    cm = plt.cm.get_cmap('RdYlBu')
+
     plt_iter=ax.scatter(iterx,itery,c=np.arange(0,len(iterhist)),cmap='Greys',marker="")
     fig.colorbar(plt_iter,format='%.0f')
-    # plt.colorbar(cm)
-    # sc = plt.scatter(xy, xy, c=z, vmin=0, vmax=20, s=35, cmap=cm)
-    # plt.colorbar(fig)
-    # cb1.set_label('Some Units')
-    # fig.show()    
-    # iternumber = np.arange(0,len(iterhist))
-    # plt_iter = plt.scatter(iterx,itery,c=iternumber,cmap='Greys') 
-    
-    # plt.colorbar(plt_iter)
+
     fig.show
     filename = msg + '.svg'
     plt.savefig(filename,dpi=300)
@@ -1580,12 +1386,89 @@ def plot_iter_history_contour(fun,fcnargs,fixed,lambdastar,eta,lt,xrange,yrange,
 def evaluate_results(xf,yf,best_x,best_f,lt0,minlist,tabulist,startptlistnew, 
                      argsmin2,trackfunc,trackfunc_hist,
                      best_x_hist,best_f_hist,round_hist,icount,
-                     glbtol,tp_total,tp_used,findzero,success_tunnel,tunphases,
+                     glbtol,tp_used,findzero,success_tunnel,
                      esc_attempt,nonewpt,trytunnel):
+    '''
+    Evaluates result of minimization phase
+
+    Parameters
+    ----------
+    xf : np array
+        x* from Min phase
+    yf : float
+        f(x*)
+    best_x : np array
+        Current best x* value overall
+    best_f : float
+        Current best f* value overall
+    lt0 : float
+        Tabulist pole strength
+    minlist : list
+        List of global minima
+    tabulist : list
+        List of tabu x
+    startptlistnew : list
+        List of start points
+    argsmin2 : tuple
+        Arguments passed to functions
+    trackfunc : callable
+        Tracked function
+    trackfunc_hist : list
+        History of tracked function values
+    best_x_hist : list
+        History of best x values
+    best_f_hist : list
+        History of best f values
+    round_hist : list
+        History of round #s
+    icount : int
+        Round counter
+    glbtol : float
+        Tolerance value
+    tp_used : int
+        Number of tunneling phases used
+    findzero : list
+        Results from tunneling function
+    success_tunnel : int
+        Track # of successful tunneling phases
+    esc_attempt : int
+        Tracking number of escape attempts from current minimum
+    nonewpt : 0 or 1
+        Tracks if a new point of interest has been found
+    trytunnel : boolean
+        Whether or not to tunnel
+
+    Returns
+    -------
+    best_x : np array
+        Current best x* value overall
+    best_f : float
+        Current best f* value overall
+    best_x_hist : list
+        History of best x values
+    best_f_hist : list
+        History of best f values
+    minlist : list
+        List of global minima
+    startptlistnew : list
+        List of start points
+    round_hist : list
+        History of round #s
+    trackfunc_hist : list
+        History of tracked function values
+    nonewpt : TYPE
+        DESCRIPTION.
+    trytunnel : boolean
+        Whether or not to try tunneling
+    success_tunnel : int
+        Track # of successful tunneling phases
+    esc_attempt : int
+        Track # of attempts to escape minimum
+
+    '''
     # better min
     if yf < best_f - glbtol and \
-        not np.any(np.isclose(xf,minlist,atol=1e-3),axis=0).all():# and\
-        #not np.any(np.isclose(xf,startptlistnew,atol=1e-3),axis=0).all(): #any((int_to_ext(xf,lbs[0],ubs[0])==test).all() for test in int_to_ext(tabulist,lbs[0],ubs[0])): #not any(np.isclose(xf,tabulist,glbtol)):
+        not np.any(np.isclose(xf,minlist,atol=1e-3),axis=0).all():
         best_f = np.array([yf])
         best_x = xf.copy()
         best_x_hist.append(best_x)
@@ -1600,12 +1483,10 @@ def evaluate_results(xf,yf,best_x,best_f,lt0,minlist,tabulist,startptlistnew,
         print('New global min')
         print('Found new best min: ', np.around(xf,3))
         if findzero[2] == True: success_tunnel += 1
-        tp_total = tunphases
         
     # Check if same level min
     elif best_f - glbtol <= yf <= best_f + glbtol and \
         not np.any(np.isclose(xf,minlist,atol=1e-2),axis=0).all():# and \
-        #not np.any(np.isclose(xf,startptlistnew,atol=1e-3),axis=0).all(): #!!! add check that xf not already in tabulist of minima
         if yf < best_f[0]:
             best_f = np.array([yf])
             best_x = xf.copy()
@@ -1618,9 +1499,7 @@ def evaluate_results(xf,yf,best_x,best_f,lt0,minlist,tabulist,startptlistnew,
         startptlistnew.append(xf)
         print('Same level global min: ', np.around(xf,3))
         print(np.around(minlist,3))
-        # tp_total -= tp_used
         if findzero[2] == True: success_tunnel += 1
-        tp_total = tunphases
 
     # not a min
     elif yf >= best_f + glbtol:
@@ -1630,23 +1509,20 @@ def evaluate_results(xf,yf,best_x,best_f,lt0,minlist,tabulist,startptlistnew,
         if len(startptlistnew) == 0: startptlistnew.append(xf)
         if not np.any(np.isclose(xf,startptlistnew,atol=1e-3),axis=0).all():
             startptlistnew.append(xf) #keep as start pt if tricks tunneling lol
-            tabulist.append(xf) #add to toplevel tabulist
+            tabulist.append(xf) #add to top level tabulist
         else:
             lt0 += lt0 #increase tabulist if ending up again at it
-        tp_total -= tp_used
-        #change start pt to best x?
+       
     # repeated min
     else:
         print('Repeat min point: ', np.around(xf,3))
         nonewpt = 1
         esc_attempt +=1 #try again some times to escape min
         print('Escape attempts: ',esc_attempt)
-        # l0 += l0 # try 12/8/22
-        tp_total -= tp_used
-        if esc_attempt >= 5: # Pick limit???
-            trytunnel = False #don't repeat tunneling
+        if esc_attempt >= 5: 
+            trytunnel = False # don't repeat tunneling
     return best_x, best_f, best_x_hist, best_f_hist, minlist,\
-        startptlistnew,round_hist, trackfunc_hist, tp_total, nonewpt, trytunnel,\
+        startptlistnew,round_hist, trackfunc_hist, nonewpt, trytunnel,\
             success_tunnel, esc_attempt
 
 def printiter(X):
@@ -1656,13 +1532,28 @@ def printiter(X):
     print(X)
     return []
 
-# Python program to copy or clone a list
-# Using the Slice Operator
-def clone(li):
-    li_copy = li[:]
-    return li_copy
 
 def record_trackfuncs(x,objargs,funclist,current):
+    '''
+    Record functions to be tracked
+
+    Parameters
+    ----------
+    x : np array
+        Point x at which to evaluate
+    objargs : tuple
+        Arguments to be passed to tracked functions
+    funclist : list of callables
+        Functions to be tracked
+    current : list
+        Current list of tracked function values
+
+    Returns
+    -------
+    list
+        List of tracked function values so far
+
+    '''
     newvals = np.zeros([len(funclist),1])
     ii = 0
     for f in funclist:
@@ -1672,9 +1563,28 @@ def record_trackfuncs(x,objargs,funclist,current):
         return newvals
     else:
         return np.append(current,newvals,axis=1)
-    # np.append(trackfunc_hist,trackfuncvals,axis=1)
 
 def choosemin(x1,x2,f,fargs):
+    '''
+    Selects minimum/best x
+    
+    Parameters
+    ----------
+    x1 : np array
+        First x value
+    x2 : np array
+        Second x value
+    f : callable
+        Function used to evaluate which x is best
+    fargs : tuple
+        Arguments passed to f
+
+    Returns
+    -------
+    np array, int
+        Returns best x and corresponding f(x).
+
+    '''
     f1 = f(x1,*fargs)
     f2 = f(x2,*fargs)
     if f1 < f2:
@@ -1683,6 +1593,24 @@ def choosemin(x1,x2,f,fargs):
         return x2, f2
 
 def sortstartpts(xlst,f,*args):
+    '''
+    Sort xlst by f(x)
+
+    Parameters
+    ----------
+    xlst : list
+        List of x start values
+    f : callable
+        Function used to evaluate x
+    *args : tuple
+        Arguments passed to f
+
+    Returns
+    -------
+    sortlst : list
+        Sorted list of x
+
+    '''
     fvals = []
     for x in xlst:
         fvals.append(f(x,*args))
@@ -1690,12 +1618,71 @@ def sortstartpts(xlst,f,*args):
     return sortlst
 
 def wolfe(fk1,fk,alphak,gradfk1,gradfk,dk,c1,c2):
+    '''
+    Check Wolfe criteria
+
+    Parameters
+    ----------
+    fk1 : int
+        f_(k+1)
+    fk : int
+        f_k
+    alphak : int
+        step size
+    gradfk1 : np array
+        Gradient of f_(k+1)
+    gradfk : np array
+        Gradient of f_k
+    dk : np array
+        DESCRIPTION.
+    c1 : int
+        Wolfe constant c1
+    c2 : int
+        Wolfe constant c2
+
+    Returns
+    -------
+    bool
+        Whether step passes Wolfe criteria or not
+        
+    '''
     if (fk1 <= fk + c1*alphak*np.dot(gradfk,dk)) and (np.dot(gradfk1,dk) >= c2*np.dot(gradfk,dk)):
         return True
     else:
         return False
 
 def print_tun_step(k,xk,f1k,f2k,gf2k,Tkf1,Tkf2,gTf1k,gTf2k,eta,alphaiter,func):
+    '''
+    Prints info each tunneling step
+
+    Parameters
+    ----------
+    k : int
+        Iteration number.
+    xk : np array
+        Current x
+    f1k : float
+        f_1(x)
+    f2k : float
+        f_2(x)
+    gf2k : np array
+        Gradient of f_2(x)
+    Tkf1 : float
+        Tunneling function value using f1 T_1(x)
+    Tkf2 : float
+        Tunneling function value using f2 T_2(x)
+    gTf1k : np array
+        Gradient of T_1(x)
+    gTf2k : np array
+        Gradient of T_2(x)
+    eta : float
+        Pole strength
+    alphaiter : float
+        Step size iteration number
+    func : float
+        Whether switching is turned off or on (0 or 1)
+
+    '''
     print('Iter: ',k)
     print('\tSwitch:',func)
     print('\txk: ',np.around(xk,3))
@@ -1711,6 +1698,32 @@ def print_tun_step(k,xk,f1k,f2k,gf2k,Tkf1,Tkf2,gTf1k,gTf2k,eta,alphaiter,func):
     return 0
 
 def check_stop(icount,maxrounds,tstart,tlimit,minlist,stopfunc,*argsmin):
+    '''
+    Check if optimization should stop
+
+    Parameters
+    ----------
+    icount : int
+        Current round #
+    maxrounds : int
+        Max number of rounds allowable
+    tstart : time
+        Starting time
+    tlimit : time
+        Max time allowable
+    minlist : list
+        List of minima
+    stopfunc : callable
+        Stopping function
+    *argsmin : tuple
+        Arguments passed to stopping function
+
+    Returns
+    -------
+    bool
+        Whether or not stop evaluates to True (i.e. optimization is stopped).
+
+    '''
     if icount > maxrounds:
         print('Max rounds exceeded')
         return False
